@@ -1,0 +1,649 @@
+---
+title: "HW5_IDS_572_NY_SB_JONA"
+author: "Navya Yadagiri 674788385,Sayali Bonawale 656488690 ,Jona 651224838"
+date: "4/25/2022"
+output: html_document
+---
+
+### Importing the library
+```{r}
+
+library(lubridate)
+library(skimr)
+library(dplyr)
+#library(devtools)
+library(tidyverse)
+library(psych)
+library(randomForest)
+library("tidycomm")
+library(visdat)
+library("funModeling")
+library("Hmisc")
+library("rpart")
+library("caret")
+library("rpart.plot")
+
+```
+
+
+### Import the dataset
+```{r}
+
+#Importing data that has order and sample data
+original_dataset <- readxl::read_excel("Champo Carpets.xlsx", sheet = "Raw Data-Order and Sample");
+
+head(original_dataset)
+
+# There are 16 columns
+colnames(original_dataset)
+
+summary(original_dataset)
+
+#The customer order no is assigned a character data type, which in ideal case should be an integer
+#original_dataset$CustomerOrderNo
+
+glimpse(original_dataset)
+
+#As we can see there are in total 10 missing values in the column CountryName and CustomerOrderNo
+#describe(original_dataset)
+
+sum(is.na(original_dataset))
+
+#Making the copy of the original dataset
+dataset <- data.frame(original_dataset)
+
+
+#Identifying categorical and numerical variables in the main dataset
+
+colsCategorical <- c(1:4,7,11:15)
+
+# Some of the variables need to be converted from character to categorical
+dataset[colsCategorical] <- lapply(dataset[colsCategorical], as.factor)
+
+glimpse(dataset)
+
+#Filtering out data containing only ORDER DATA from the original dataset
+#order_only_data <- dataset %>% filter(dataset, OrderCategory == Order)
+
+###---ORDER DATA--------
+
+Order_only_data <- readxl::read_excel("Champo Carpets.xlsx", sheet = "Data Order ONLY");
+
+head(Order_only_data)
+
+#This data has an addition column - Customer code - telling what type of cutomer segment it is
+
+#There are around 12 columns in the order only data
+colnames(Order_only_data)
+summary(Order_only_data)
+
+#There are few variables that needs their datatypes to be changed
+categorical_variablesOD <- c(1,2,6,7,8,9,10)
+
+Order_only_data[categorical_variablesOD] <- lapply(Order_only_data[categorical_variablesOD], as.factor)
+
+glimpse(Order_only_data)
+
+#As we can see there are in total 10 missing values in the column CountryName and CustomerOrderNo
+#describe(Order_only_data)
+
+sum(is.na(Order_only_data))
+
+
+####----SAMPLE DATA -----
+
+#The sample data contains predict varable whether the sample has converted to an order or not 
+
+#If its 1 - Converted 
+#If its 0 - Not Converted
+
+sample_only_dataset <- readxl::read_excel("Champo Carpets.xlsx", sheet = "Data on Sample ONLY");
+
+
+names(sample_only_dataset)[names(sample_only_dataset) == 'Order Conversion'] <- "Order_Conversion"
+names(sample_only_dataset)[names(sample_only_dataset) == 'Hand Tufted'] <- "Hand_Tufted"
+names(sample_only_dataset)[names(sample_only_dataset) == 'Double Back'] <- "Double_Back"
+names(sample_only_dataset)[names(sample_only_dataset) == 'Hand Woven'] <- "Hand_Woven"
+
+
+sample_only_dataset$Order_Conversion <- as.factor(sample_only_dataset$Order_Conversion)
+sample_only_dataset$CustomerCode <- as.factor(sample_only_dataset$CustomerCode)
+sample_only_dataset$ShapeName <- as.factor(sample_only_dataset$ShapeName)
+
+sample_demo <- sample_only_dataset[sample(nrow(sample_only_dataset)),]
+sample_demo <- subset (sample_demo, select = -c(USA, UK, Italy, Belgium, Romania, Australia, India))
+
+#Add Column Corresponding to the countries
+sample_only_dataset$Poland<-ifelse(sample_only_dataset$CountryName=="POLAND",1,0)
+sample_only_dataset$Brazil<-ifelse(sample_only_dataset$CountryName=="BRAZIL",1,0)
+sample_only_dataset$Canada<-ifelse(sample_only_dataset$CountryName=="CANADA",1,0)
+sample_only_dataset$Israel<-ifelse(sample_only_dataset$CountryName=="ISRAEL",1,0)
+sample_only_dataset$China<-ifelse(sample_only_dataset$CountryName=="CHINA",1,0)
+sample_only_dataset$South_Africa<-ifelse(sample_only_dataset$CountryName=="SOUTH AFRICA",1,0)
+sample_only_dataset$UAE<-ifelse(sample_only_dataset$CountryName=="UAE",1,0)
+
+sample_only_dataset$USA<-ifelse(sample_only_dataset$CountryName=="POLAND",1,0)
+sample_only_dataset$UK<-ifelse(sample_only_dataset$CountryName=="BRAZIL",1,0)
+sample_only_dataset$Italy<-ifelse(sample_only_dataset$CountryName=="CANADA",1,0)
+sample_only_dataset$Belgium<-ifelse(sample_only_dataset$CountryName=="ISRAEL",1,0)
+sample_only_dataset$Romania<-ifelse(sample_only_dataset$CountryName=="CHINA",1,0)
+sample_only_dataset$Australia<-ifelse(sample_only_dataset$CountryName=="SOUTH AFRICA",1,0)
+sample_only_dataset$India<-ifelse(sample_only_dataset$CountryName=="UAE",1,0)
+
+
+levels(sample_only_dataset$Order_Conversion) <- c("Not Converted","Converted")
+
+```
+
+#Balance and Unbalanced data
+```{r}
+#Lets look at the summary of the target variable - Order conversion
+summary(sample_only_dataset$Order_Conversion)
+#There are  4651 instances with no conversion and 1169 with conversion, we can clearly see that the data set is an unbalanced data, and we can combat using the following 3 techniques:
+
+##1. Under- Sampling 
+##2.Over -Sampling 
+##3. SMOTE 
+
+#install.packages("ROSE")
+library(ROSE)
+
+sample_only_dataset$Order_Conversion  <- as.factor(ifelse(sample_only_dataset$Order_Conversion == "1","Converted","Not Converted"))
+
+balanced_sample_dataset <- ovun.sample(Order_Conversion~., data = sample_only_dataset, method = "over", N = 9000)$data
+
+summary(balanced_sample_dataset$Order_Conversion)
+aa<-write.csv(sample_only_dataset)
+
+#Clearly the data set is unbalanced and for this assignment we are using under fitting 
+```
+
+### Performing Univariant Analysis on the raw and Order data:
+```{r}
+
+#Describing the categorical variables
+describe_cat(original_dataset)
+
+attach(dataset)
+
+#Identifying the different kinds of orders in each country and for each customer segments
+
+levels(CustomerCode)
+
+sum(is.na(original_dataset))
+
+colnames(original_dataset)
+
+levels(OrderCategory)
+#Display the different customer codes in each country for both order categories
+```
+
+
+### Basic Visualisations
+
+```{r}
+ggplot(data.frame(dataset), aes(x=CountryName)) + geom_bar() + ggtitle("Distribution of Demand for Sample and Countries in Different Countries") +  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+#As we can see the highest number of orders and sample request come from USA and India, which can be identified as biggest carpet markets, and later comes Italy
+
+#Biggest Markets for Carpets - Countries
+#1. USA
+#2. India
+#3. UK 
+
+```
+
+
+###Applying Decision Trees for the Sample Only data
+
+```{r}
+set.seed(1234)
+nrow(sample_only_dataset)
+
+#There are no Null values
+sum(is.na(sample_only_dataset))
+
+indx <- sample(2, nrow(sample_only_dataset), replace = TRUE, prob = c(0.8,0.2))
+
+#Splitting the train and test data
+train <- sample_only_dataset[indx == 1, ]
+test <- sample_only_dataset[indx == 2,]
+
+sum(is.na(train))
+
+sum(is.na(sample_only_dataset))
+
+nrow(train)/nrow(test) #4:1
+
+attach(sample_only_dataset)
+formula = Order_Conversion ~ .
+
+library(rpart)
+library(rpart.plot)
+mytree <- rpart(formula, data = train)
+
+rpart.plot(mytree)
+
+
+
+tree_pred_train <- predict(mytree, train, type = "class")
+
+train_Error <- mean(tree_pred_train != test$Order_Conversion)
+
+train_Error # <- The train error is 28%
+
+sum(is.na(tree_pred_train))
+
+testPred <- predict(mytree, newdata = test, type = "class")
+
+#Checking the test error:
+mean(testPred != test$Order_Conversion)
+
+#The test error is 10%
+
+```
+
+###Random Forest
+```{r}
+ntree <- 100
+set.seed(123)
+
+random_forest_data <- sample_demo[sample(nrow(sample_demo)),]
+random_forest_data <- subset (random_forest_data, select = -c(3:10))
+
+str(random_forest_data)
+colnames(random_forest_data)
+
+##There are 273 NA values
+# table(is.na(random_forest_data))
+# 
+# lapply(random_forest_data, function(x) { length(which(is.na(x)))})
+
+myFormula = Order_Conversion~ .
+
+##Building random forest model
+rf <- randomForest(myFormula, data = random_forest_data, mtry = sqrt(ncol(random_forest_data)-1), ntree = 300, proximity = T, importance = T)
+
+print(rf)
+
+#Assigning the importance for each variable
+rf$importance
+importance(rf, type = 1)
+importance(rf, type = 2)
+
+varImpPlot(rf)
+
+rf$err.rate[ntree,1]
+rf$predicted
+
+# Confusion matrix
+Confusion_Matrix_Random <- table(rf$predicted, random_forest_data$Order_Conversion, dnn = c("Predicted", "Actual"))
+Confusion_Matrix_Random
+library(caret)
+confusionMatrix(rf$predicted, random_forest_data$Order_Conversion, positive = "Converted")
+```
+
+# Drawing evaluation charts
+```{r}
+library(ROCR)
+pred <- prediction(rf$votes[, 2],random_forest_data$Order_Conversion)
+```
+# Gain Chart
+###Gain chart presents the percentage of captured positive responses as a function of selected percentage of a sample.
+####Which is actually in our case
+```{r}
+perf <- performance(pred, "tpr", "rpp")
+plot(perf)
+```
+
+# Response Chart
+```{r}
+perf <- performance(pred, "ppv", "rpp")
+plot(perf)
+```
+
+# Lift Chart 
+###The lift chart measures effectiveness of our predictive classification model comparing it with the baseline model.
+```{r}
+perf <- performance(pred, "lift", "rpp")
+plot(perf)
+
+```
+
+
+# ROC Curve - We can conclude that we have a smaller false alarm and also has higher recall,captures more retained(positve)
+
+```{r}
+perf <- performance(pred, "tpr", "fpr")
+plot(perf)
+
+```
+
+# auc
+##Since the AUC is 0.86 and the graph clearly shows the the model is accurate and a good model 
+```{r}
+auc <- performance(pred, "auc")
+auc
+auc <- unlist(slot(auc, "y.values"))
+auc
+```
+
+##K-means clustering
+
+```{r}
+cluster_dataset <- readxl::read_excel("Champo Carpets.xlsx", sheet = "Data for Clustering");
+colnames(cluster_dataset)
+#describe(cluster_dataset)
+attach(cluster_dataset)
+# head(cluster_dataset, n = 3)
+#str(cluster_dataset)
+glimpse(cluster_dataset)
+summary(cluster_dataset)
+
+
+cluster_dataset <- data.frame(cluster_dataset)
+cluster_dataset$Row.Labels <- as.factor(cluster_dataset$Row.Labels)
+cluster_dataset$Sum.of.QtyRequired <- as.numeric(cluster_dataset$Sum.of.QtyRequired)
+cluster_dataset$Sum.of.TotalArea <- as.numeric(cluster_dataset$Sum.of.TotalArea)
+cluster_dataset$Sum.of.Amount <- as.numeric(cluster_dataset$Sum.of.Amount)
+cluster_dataset$DURRY <- as.numeric(cluster_dataset$DURRY)
+cluster_dataset$HANDLOOM <- as.numeric(cluster_dataset$HANDLOOM)
+cluster_dataset$DOUBLE.BACK <- as.numeric(cluster_dataset$DOUBLE.BACK)
+cluster_dataset$JACQUARD <- as.numeric(cluster_dataset$JACQUARD)
+cluster_dataset$HAND.TUFTED <- as.numeric(cluster_dataset$HAND.TUFTED)
+cluster_dataset$HAND.WOVEN <- as.numeric(cluster_dataset$HAND.WOVEN)
+cluster_dataset$KNOTTED <- as.numeric(cluster_dataset$KNOTTED)
+cluster_dataset$GUN.TUFTED <- as.numeric(cluster_dataset$GUN.TUFTED)
+cluster_dataset$Powerloom.Jacquard <- as.numeric(cluster_dataset$Powerloom.Jacquard)
+cluster_dataset$INDO.TEBETAN <- as.numeric(cluster_dataset$INDO.TEBETAN)
+
+glimpse(cluster_dataset)
+
+### Check if any missing values in the dataset
+sum(is.na(cluster_dataset[,]))
+###There are no missing values in the dataset
+
+###We use min max transformation to normalize instances:
+
+#We are scaling because we want our data to be weighted to have more a balanced data so that it doesnot affect the euclidean distance
+library(dplyr)
+myscale <- function(x) {
+(x - min(x)) / (max(x) - min(x))
+}
+cluster_data <- cluster_dataset %>% 
+  mutate_if(is.numeric, myscale)
+
+#describe(cluster_data)
+attach(cluster_data)
+
+cluster_data <- select(cluster_data, 2:14)
+
+table(is.na(cluster_data))
+###k-means
+### To create graphs of the clusters generated with the kmeans function
+library(factoextra)
+km1 <- kmeans(cluster_data, centers = 2, nstart = 100)
+km2 <- kmeans(cluster_data, centers = 3, nstart = 100)
+km3 <- kmeans(cluster_data, centers = 4, nstart = 100)
+km4 <- kmeans(cluster_data, centers = 5, nstart = 100)
+
+str(km1)  
+km2
+
+km1$cluster
+km1$centers
+km1$withinss
+km1$betweenss
+km1$size
+
+# plots to compare
+p1 <- fviz_cluster(km1, geom = "point", data = cluster_data) + ggtitle("k = 2")
+p2 <- fviz_cluster(km2, geom = "point", data = cluster_data) + ggtitle("k = 3")
+p3 <- fviz_cluster(km3, geom = "point", data = cluster_data) + ggtitle("k = 4")
+p4 <- fviz_cluster(km4, geom = "point", data = cluster_data) + ggtitle("k = 5")
+
+library(gridExtra)
+grid.arrange(p1, p2, p3, p4, nrow = 2)
+
+##To determine the number of clusters we use elbow method
+set.seed(123)
+# function to compute total within-cluster sum of square
+wss <- function(k) {
+  kmeans(cluster_data, centers = k, nstart = 100)$tot.withinss
+}
+# Compute and plot wss for k = 1 to k = 15
+k.values <- 1:15
+
+# extract wss for 2-15 clusters
+library(tidyverse)
+wss_values <- map_dbl(k.values, wss)
+plot(k.values, wss_values, type="b", pch = 19, frame = FALSE, xlab="Number of clusters", ylab="Total within-clusters sum of squares")
+
+##To get the screen plot, we can also use the "fviz_nbclust" function.
+set.seed(123)
+fviz_nbclust(cluster_data, kmeans, method = "wss")
+
+# function to compute average silhouette for k clusters
+library(cluster)
+avgsil <- function(k) {
+kmModel <- kmeans(cluster_data, centers = k, nstart = 100)
+ss <- silhouette(kmModel$cluster, dist(cluster_data))
+mean(ss[, 3])
+}
+# Compute and plot wss for k = 2 to k = 15
+k.values <- 2:15
+# extract avg silhouette for 2-15 clusters
+avgsil_values <- map_dbl(k.values, avgsil)
+plot(k.values, avgsil_values, type = "b", pch = 19, frame = FALSE, xlab = "Number of clusters", ylab = "Average Silhouettes")
+
+##Similar to the elbow method, the "average silhoutete method" can be found in fviz_nbclust function.
+fviz_nbclust(cluster_data, kmeans, method = "silhouette")
+
+##Suppose km3 is our final model:
+fviz_cluster(km3, data = cluster_data)
+
+###After we finalize our kmeans model, we can extract the clusters and do some descriptive analysis at each cluster. For example:
+cluster_data %>%
+mutate(Cluster = km3$cluster) %>%
+group_by(Cluster) %>%
+summarise_all("mean")
+```
+
+```{r}
+library(ROSE)
+
+sample_only_dataset <- readxl::read_excel("Champo Carpets.xlsx", sheet = "Data on Sample ONLY");
+sample_only_dataset <- subset(sample_only_dataset, select = -c(3:9, 12:19,21:23))
+colnames(sample_only_dataset)
+sample_dataset <- sample_only_dataset[sample(nrow(sample_only_dataset)),]
+
+names(sample_dataset)[names(sample_dataset) == 'Order Conversion'] <- "Order_Conversion"
+sample_dataset$Order_Conversion <- as.factor(sample_dataset$Order_Conversion)
+
+levels(sample_dataset$Order_Conversion) <- c("Not Converted","Converted")
+
+balanced_sample_dataset <- ovun.sample(sample_dataset$Order_Conversion~., data = sample_dataset, method = "over", N = 10000)$data
+```
+
+###Neural network model using nnet####
+```{r}
+sample_dataset_nn <- sample_demo[sample(nrow(sample_demo)),]
+#sample_dataset_nn <- subset(sample_dataset_nn, select = -c(1))
+
+colnames(sample_dataset_nn)
+
+##There are 273 NA values
+table(is.na(sample_dataset_nn))
+
+lapply(sample_dataset_nn, function(x) { length(which(is.na(x)))})
+
+#There are few variables that needs their datatypes to be changed
+# categorical_variablesSD <- c(1,2,6,7,8,9)
+# sample_dataset[categorical_variablesSD] <- lapply(sample_dataset[categorical_variablesSD], as.factor)
+attach(sample_dataset_nn)
+
+sample_dataset_nn$CustomerCode<- as.numeric(factor(as.matrix(sample_dataset_nn$CustomerCode)))
+sample_dataset_nn$CountryName<- as.numeric(factor(as.matrix(sample_dataset_nn$CountryName)))
+sample_dataset_nn$ITEM_NAME<- as.numeric(factor(as.matrix(sample_dataset_nn$ITEM_NAME)))
+sample_dataset_nn$ShapeName<- as.numeric(factor(as.matrix(sample_dataset_nn$ShapeName)))
+
+# sample_dataset_nn$CountryName <- as.numeric(sample_dataset_nn$CountryName)
+# sample_dataset_nn$ITEM_NAME <- as.numeric(sample_dataset_nn$ITEM_NAME)
+# sample_dataset_nn$ShapeName <- as.numeric(sample_dataset_nn$ShapeName)
+
+nrow(sample_dataset_nn)
+
+head(sample_dataset_nn)
+##Normalize data before training a neural network###
+###myscale() function uses min-max transformation to normalize variable x
+myscale <- function(x)
+{
+  (x - min(x)) / (max(x) - min(x))
+}
+
+sample_dataset_nn <- sample_dataset_nn %>% mutate_if(is.numeric, myscale)
+
+###Splitting the normalized data into train and test set
+set.seed(1234)
+indx <- sample(2, nrow(sample_dataset_nn), replace = T, prob = c(0.7,0.3))
+train <- sample_dataset_nn[indx == 1,]
+test <- sample_dataset_nn[indx == 2,]
+
+
+###Using nnet function to build neural network model
+attach(sample_dataset_nn)
+library(nnet)
+nnModel <- nnet(Order_Conversion ~., data = train, linout = FALSE, size = 10, hidden =3, decay = 0.01, maxit = 1000)
+summary(nnModel)
+
+nnModel$wts
+nnModel$fitted.values
+
+##To draw nnet model
+library(NeuralNetTools)
+plotnet(nnModel)
+
+##Neural network model used to predict test instances
+nn.preds = predict(nnModel, test)
+
+##Notice we still have results between 0 and 1 that are more like probabilities of belonging to each class. To get the predicted classes we can use change the type argument.
+
+nn.preds = as.factor(predict(nnModel, test, type = "class"))
+
+##Confusion Matrix
+ConfMatrix <- table(nn.preds, test$Order_Conversion, dnn = c("predicted","actual"))
+print(ConfMatrix)
+
+##Check performance of neural network model
+error_metric = function(ConfMatrix)
+{
+TN = ConfMatrix[1,1]
+TP = ConfMatrix[2,2]
+FN = ConfMatrix[1,2]
+FP = ConfMatrix[2,1]
+recall = (TP)/(TP+FN)
+precision =(TP)/(TP+FP)
+falsePositiveRate = (FP)/(FP+TN)
+falseNegativeRate = (FN)/(FN+TP)
+error =(FP+FN)/(TP+TN+FP+FN)
+modelPerf <- list("precision" = precision,
+"recall" = recall,
+"falsepositiverate" = falsePositiveRate,
+"falsenegativerate" = falseNegativeRate,
+"error" = error)
+return(modelPerf)
+}
+outPutlist <- error_metric(ConfMatrix)
+library(plyr)
+df <- ldply(outPutlist, data.frame)
+setNames(df, c("", "Values"))
+
+```
+
+##Hierarchial Clustering 
+```{r}
+cluster_dataset <- readxl::read_excel("Champo Carpets.xlsx", sheet = "Data for Clustering");
+attach(cluster_dataset)
+
+any(is.na(cluster_dataset))
+library(dplyr)
+myscale <- function(x) {
+  (x - min(x)) / (max(x) - min(x))
+}
+df <- cluster_dataset %>% mutate_if(is.numeric, myscale)
+
+distance <- dist(df, method = "euclidean")
+hcomplete <- hclust(distance, method = "complete")
+plot(hcomplete, cex = 0.6, hang = -2)
+clusters <- cutree(hcomplete, k = 4)
+
+
+library(cluster)
+hagnes <- agnes(df, method = "complete")
+pltree(hagnes, cex = 0.6, hang = -2)
+clusters2 <- cutree(as.hclust(hagnes), k = 4)
+table(clusters2)
+table(clusters)
+
+m <- c("average", "single", "complete", "ward")
+names(m) <- c("average", "single", "complete", "ward")
+
+ac <- function(x)
+{
+  agnes(df, method = x)$ac
+}
+
+library(purrr)
+map_dbl(m, ac)
+```
+
+##Ada boosting 
+```{r}
+
+install.packages("adabag")
+library(adabag)
+library(caret)
+
+indexes=createDataPartition(Sample_only_data$Order_Conversion, p=.90, list = F)
+train = Sample_only_data[indexes, ]
+test = Sample_only_data[-indexes, ]
+
+head(train)
+
+train$Order_Conversion
+
+adaboost<-boosting(Order_Conversion~., data=train, boos=TRUE, mfinal=20,coeflearn='Breiman')
+summary(adaboost)
+
+
+pred = predict(model, test)
+
+print(pred$confusion)
+
+print(pred$error)
+
+result = data.fram(test$Order_Conversion, pred$prob, pred$class)
+
+print(result)
+
+
+```
+
+```{r}
+
+#Variable Selection
+
+sample_only_dataset
+#Forward Selection
+full <- lm()
+
+
+
+
+#Backward Selection
+
+#Step wise
+```
+
+
+
